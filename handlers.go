@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math/rand"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -74,9 +75,47 @@ func RedirectHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	RedisClient.Incr(ctx, "count:" + shortUrl)
+	RedisClient.Incr(ctx, "count:"+shortUrl)
 
 	http.Redirect(w, r, url, http.StatusMovedPermanently)
+}
+
+func StatsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	shortURL := strings.TrimPrefix(r.URL.Path, "/stats/")
+	ctx := context.Background()
+
+	visitsStr, err := RedisClient.Get(ctx, "count:"+shortURL).Result()
+	if err == redis.Nil {
+		http.Error(w, "Short URL not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		http.Error(w, "Error retrieving count", http.StatusInternalServerError)
+		return
+	}
+
+	visits, err := strconv.Atoi(visitsStr)
+	if err != nil {
+		http.Error(w, "Error converting visit count", http.StatusInternalServerError)
+		return
+	}
+
+	response, err := json.Marshal(map[string]interface{}{
+		"short_url": shortURL,
+		"visits":    visits,
+	})
+	if err != nil {
+		http.Error(w, "Error marshaling response", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(response)
 }
 
 func generateShortID(length int) string {
