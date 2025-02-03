@@ -21,7 +21,7 @@ func DynamicHandler(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(path, "stats/") {
 		// StatsHandler(w, r)
 	} else {
-		// RedirectHandler(w, r)
+		RedirectHandler(w, r)
 	}
 }
 

@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"math/rand"
 	"net/http"
+	"strings"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 type UrlRequest struct {
@@ -15,7 +18,7 @@ type UrlRequest struct {
 }
 
 func ShortenHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
+	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -27,21 +30,21 @@ func ShortenHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shortID := req.CustomAlias
-	if shortID == "" {
-		shortID = generateShortID(5)
+	shortUrl := req.CustomAlias
+	if shortUrl == "" {
+		shortUrl = generateShortID(5)
 	}
 
 	ctx := context.Background()
 
 	expirationTime := time.Duration(req.Expiration) * time.Second
-	err := RedisClient.Set(ctx, shortID, req.LongUrl, expirationTime).Err()
+	err := RedisClient.Set(ctx, shortUrl, req.LongUrl, expirationTime).Err()
 	if err != nil {
 		http.Error(w, "Failed to store URL in Redis", http.StatusInternalServerError)
 		return
 	}
 
-	response, err := json.Marshal(map[string]string{"short_url": shortID})
+	response, err := json.Marshal(map[string]string{"short_url": shortUrl})
 	if err != nil {
 		http.Error(w, "Error marshaling response", http.StatusInternalServerError)
 		return
@@ -50,6 +53,30 @@ func ShortenHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(response)
+}
+
+
+func RedirectHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	
+	shortUrl := strings.TrimPrefix(r.URL.Path, "/")
+	ctx := context.Background()
+
+	url, err := RedisClient.Get(ctx, shortUrl).Result()
+	if err == redis.Nil {
+		http.Error(w, "URL not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		http.Error(w, "Error retrieving URL", http.StatusInternalServerError)
+		return
+	}
+
+	RedisClient.Incr(ctx, "count:" + shortUrl)
+
+	http.Redirect(w, r, url, http.StatusMovedPermanently)
 }
 
 func generateShortID(length int) string {
